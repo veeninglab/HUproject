@@ -1,0 +1,52 @@
+---
+title: "DnaX_spots"
+output: html_notebook
+---
+
+
+
+```{r}
+library(tidyverse)
+library(bactMAP)
+```
+
+
+```{r}
+addPixels2um("VL","0.0496813")
+
+Mesh_with_D <- extr_Oufti("atc/atc_DAPI.csv", mag="VL")
+Mesh_with_G <- extr_Oufti("atc/atc_GFP.csv", mag="VL")
+Mesh_no_D <- extr_Oufti("noatc/noatc_DAPI.csv", mag="VL")
+Mesh_no_G <- extr_Oufti("noatc/noatc_GFP.csv", mag="VL")
+```
+
+
+```{r}
+
+#spots_with <- read.csv2("DnaX-HU-X_Tc_allspots.csv", sep=",")[-c(1:3),] |>
+  #mutate(x=as.numeric(POSITION_X)/0.0496813, y=as.numeric(POSITION_Y)/0.0496813, frame=as.numeric(FRAME)+1)
+#spots_without <- read.csv2("DnaX-HU-X_allspots.csv", sep=",")[-c(1:3),] |>
+  #mutate(x=as.numeric(POSITION_X)/0.0496813, y=as.numeric(POSITION_Y)/0.0496813, frame=as.numeric(FRAME)+1)
+
+spots_with <- extr_ISBatch("atc/atc_spots.csv")
+spots_without <- extr_ISBatch("noatc/noatc_spots.csv")
+sCwith <- spotsInBox(spots_with$spotframe, Mesh_with_D$mesh)
+sCno <- spotsInBox(spots_without$spotframe, Mesh_no_D$mesh)
+
+combospots <- combineDataframes(list(sCwith$spots_relative, sCno$spots_relative), listofconditions=list("Tc", "no Tc"))
+combomesh <- combineDataframes(list(Mesh_with_D$mesh, Mesh_no_D$mesh), listofconditions=list("Tc", "no Tc"))
+comboobjects <- combineDataframes(list(Mesh_with_D$object_relative, Mesh_no_D$object_relative), listofconditions=list("Tc", "no Tc"))
+plotOverlay(combomesh$finalframe, combospots$finalframe, comboobjects$finalframe, quantiles=3, by="condition", mag="VL") -> plotOverlay
+
+plotswith <- createPlotList(sCwith$spots_relative, Mesh_with_D$mesh, colorpalette = "RedHot")
+plotswithout <- createPlotList(sCno$spots_relative, Mesh_no_D$mesh, colorpalette = "RedHot")
+```
+
+```{r}
+
+combospots_sum <- combospots$finalframe |> group_by(condition, cell, frame, max.width, max.length) |> mutate(nspots = n())
+comboobjects_sum <- comboobjects$finalframe |> select(-obpath, -ob_out_x, -ob_out_y, -ob_x, -ob_y) |> distinct() |> group_by(frame, cell, condition, max_um, maxwum) |> summarize(totalobarea = sum(obarea_um), n_objects = max(obnum))
+mesh_sum <- combomesh$finalframe |> select(condition, cell, frame, max.width, max.length, max_um, maxwum, area) |> distinct() |> left_join(comboobjects_sum) |> left_join(combospots_sum) 
+mesh_sum <- mesh_sum |> mutate(nspots = ifelse(is.na(nspots), 0, nspots), n_objects = ifelse(is.na(n_objects), 0, n_objects))
+
+```

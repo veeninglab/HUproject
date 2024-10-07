@@ -1,0 +1,146 @@
+---
+title: "Maria_complementation"
+output: html_notebook
+---
+
+ 
+
+```{r}
+library(tidyverse)
+library(bactMAP)
+```
+```{r}
+addPixels2um("VL", 0.0496813)
+
+noTC <- extr_Oufti("noTC_objects.csv", "VL")
+TC <- extr_Oufti("withTC_objects.csv", "VL")
+
+
+save(noTC, file = "noTC.Rda")
+save(TC, file = "TC.Rda")
+
+```
+
+```{r}
+
+All_objects <- combineDataframes(list(noTC$object_relative, TC$object_relative), listofconditions = list("noTC", "TC"))
+
+All_meshes <- combineDataframes(list(noTC$mesh, TC$mesh), listofconditions = list("noTC", "TC"))
+
+All_objects <- All_objects$finalframe |> left_join(All_meshes$finalframe |> select(frame, cell, condition, area) |> distinct()) 
+
+All_objects <- All_objects |> mutate(area_um = area * 0.0496813* 0.0496813)
+All_meshes <- All_meshes$finalframe |> mutate(area_um = area * 0.0496813* 0.0496813)
+
+All_objects_cell <- All_objects |> select(frame, cell, obID, max_um, maxwum, obwidth_um, oblength_um, obarea_um, condition, area_um) |> distinct()
+
+All_objects_cell <- All_objects_cell |> group_by(frame, cell, condition) |> mutate(n_objects = ifelse(is.na(obID), 0, n()))
+
+All_objects_cell <- All_objects_cell |> mutate(total_obarea = sum(obarea_um))
+```
+
+
+```{r}
+
+plotOverlay(All_meshes, objectdata=All_objects, by="condition", type="projection", quantiles=5) -> overlayplot
+ggsave(overlayplot, file = "Overlay.pdf", width=8, height=8)
+
+ggplot(All_objects_cell, aes(x=area_um, y=total_obarea, color=condition)) + geom_point() + facet_wrap(.~condition) + xlab("Cell area (um2)") + ylab("Nucleoid Area (um2)") -> nucovercell
+
+ggsave(nucovercell, file="Nucleoid_Cell_Area.pdf", width=6, height=6)
+
+ggplot(All_objects_cell, aes(x= condition, y=total_obarea)) + ggforce::geom_sina() + ylab("Object Area (um2)") + geom_boxplot(width=0.5) -> objectplot
+ggsave(objectplot, file="Nucleoid_Area.pdf", width=6, height=6) 
+
+ggplot(All_objects_cell, aes(x= condition, y=area_um)) + ggforce::geom_sina() + ylab("Cell Area (um2)") -> cellareaplot
+ggsave(cellareaplot, file="Cell_Area.pdf", width=6, height=6)
+
+ggplot(All_objects_cell, aes(x= condition, y=max_um)) + ggforce::geom_sina() + ylab("Cell length (um2)") -> celllengthplot
+ggsave(celllengthplot, file="Cell_Length.pdf", width=6, height=6)
+
+ggplot(All_objects_cell, aes(x= condition, y=maxwum)) + ggforce::geom_sina() + ylab("Cell width (um2)") -> cellwidthplot
+ggsave(cellwidthplot, file="Cell_Width.pdf", width=6, height=6)
+
+ggplot(All_objects_cell, aes(x= condition, y=area_um/total_obarea)) + ggforce::geom_sina() + ylab("N/C ratio") -> NCplot
+ggsave(NCplot, file="Nucleoid_Cell_Ratio.pdf", width=6, height=6)
+
+count_objects <- All_objects_cell |> ungroup() |> select(frame, cell, n_objects, condition) |> distinct() |> group_by(condition, n_objects) |>
+  summarize(count_o = n())
+
+count_objects <- count_objects |> group_by(condition) |> mutate(perc_o = count_o/sum(count_o)*100)
+
+ggplot(count_objects, aes(x=condition, y=perc_o, fill=as.factor(n_objects))) + geom_bar(stat="identity", width=0.5) + ylab("Percentage of cells carrying X nucleoids") + coord_flip() + theme_minimal() -> N_Nuc
+ggsave(N_Nuc, file="PercentageNucleoids.pdf", width=6, height=6)
+
+```
+
+```{r}
+
+T1_GFP <- extr_OriginalStack("1H_GFP.tif")
+T2_GFP <- extr_OriginalStack("2H_GFP.tif")
+T3_GFP <- extr_OriginalStack("3H_GFP.tif")
+Control_GFP <- extr_OriginalStack("TC_GFP.tif")
+
+T1_GFP_combo <- extr_OriginalCells(T1_GFP, T1$mesh)
+T2_GFP_combo <- extr_OriginalCells(T2_GFP, T2$mesh)
+T3_GFP_combo <- extr_OriginalCells(T3_GFP, T3$mesh)
+Control_GFP_combo <- extr_OriginalCells(Control_GFP, Control$mesh)
+
+```
+
+
+```{r}
+
+All_combo <- combineDataframes(list(T1_GFP_combo$rawdata_turned, T2_GFP_combo$rawdata_turned, T3_GFP_combo$rawdata_turned, Control_GFP_combo$rawdata_turned), listofconditions=list("T1", "T2", "T3", "Control"))$finalframe
+
+All_combo_projections <- All_combo |>
+  group_by(condition) |>
+  arrange(max.length) |>
+  mutate(rn = row_number(),
+         bin_rn = cut(rn, breaks=5, labels=c(1:5)),
+         bin_l = cut(max.length, breaks=5, labels=c(1:5)),
+         X_rot_round = round(X_rot, digits=0),
+         Y_rot_round = round(Y_rot, digits=0))
+
+All_combo_projectionsRN <- All_combo_projections |>
+  group_by(condition, bin_rn, X_rot_round, Y_rot_round) |>
+  summarize(medvalue = median(values),
+            meanvalue = mean(values),
+            sdvalue = sd(values))
+
+All_combo_projectionsl <- All_combo_projections |>
+  group_by(condition, bin_l, X_rot_round, Y_rot_round) |>
+  summarize(medvalue = median(values),
+            meanvalue = mean(values),
+            sdvalue = sd(values))
+
+All_combo_meanvalpercell <- All_combo |>
+  group_by(condition, cell, frame, max.length, max.width, area) |>
+  summarize(medvalue = median(values),
+            meanvalue = mean(values),
+            sdvalue = sd(values)) |>
+  left_join(All_objects_cell)
+
+ggplot(All_combo_projectionsRN, aes(x=X_rot_round, y=Y_rot_round, fill=medvalue)) + geom_raster() + facet_grid(bin_rn~condition) + coord_fixed() + scale_fill_viridis_c(option="mako") + theme_minimal() -> projectionsGFP
+
+ggsave(projectionsGFP, file="projections_GFP.PDF", width=8, height=6)
+
+```
+
+
+```{r}
+
+ks.test((All_combo_meanvalpercell |> ungroup() |> filter(condition=="T1"))$area ,(All_combo_meanvalpercell |> ungroup()  |> filter(condition=="T2"))$area)
+
+ks.test((All_combo_meanvalpercell |> ungroup() |> filter(condition=="T1"))$area ,(All_combo_meanvalpercell |> ungroup()  |> filter(condition=="T3"))$area)
+
+ks.test((All_combo_meanvalpercell |> ungroup() |> filter(condition=="T1"))$area ,(All_combo_meanvalpercell |> ungroup()  |> filter(condition=="Control"))$area)
+
+ks.test((All_combo_meanvalpercell |> ungroup() |> filter(condition=="T2"))$area ,(All_combo_meanvalpercell |> ungroup()  |> filter(condition=="T3"))$area)
+
+ks.test((All_combo_meanvalpercell |> ungroup() |> filter(condition=="T2"))$area ,(All_combo_meanvalpercell |> ungroup()  |> filter(condition=="Control"))$area)
+
+ks.test((All_combo_meanvalpercell |> ungroup() |> filter(condition=="T3"))$area ,(All_combo_meanvalpercell |> ungroup()  |> filter(condition=="Control"))$area)
+
+```
+
